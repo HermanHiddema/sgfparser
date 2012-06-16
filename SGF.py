@@ -114,13 +114,13 @@ class Parser:
 					print("Parsed game tree succesfully")
 			except SGFParseError:
 				if self.verbosity > 3:
-					print(" ".join("Error parsing game tree", (len(collection)+1)))
+					print(" ".join(("Error parsing game tree", (len(collection)+1))))
 				raise
 			self.skipWhiteSpace()
 			if self.nextToken == None: 
 				break # reached EOF after at least one game
 		if self.verbosity > 3:
-			print(" ".join("Parsed", len(collection), "game trees succesfully"))
+			print(" ".join(("Parsed", len(collection), "game trees succesfully")))
 		return collection
 	
 	def parseGameTree(self):
