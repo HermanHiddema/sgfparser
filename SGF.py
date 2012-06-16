@@ -23,8 +23,8 @@ class Parser:
 	"""
 
 #	value_re  = re.compile(r'.*?[^\\]\]', re.DOTALL)
-	value_re  = re.compile(r'(?:\\.|[^\\\]])+\]', re.DOTALL) # everything up to next unescaped ]
-	propid_re = re.compile(r'[A-Z]')
+	value_re  = re.compile(r'(?:\\.|[^\\\]])+\]', re.DOTALL) # everything up to next unescaped ']'
+	propid_re = re.compile(r'[A-Z]+')
 	space_re  = re.compile(r'\s+')
 	verbosity = 1
 
@@ -130,7 +130,7 @@ class Parser:
 		"""
 		
 		if self.nextToken != '(':
-			raise SGFParseError(self.pos, '(', self.nextToken, self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))])
+			raise SGFParseError(self.pos, '(', self.nextToken, self.context)
 		self.pos += 1;
 		subtrees = []
 		try:
@@ -141,7 +141,7 @@ class Parser:
 			raise
 	
 		pos = self.skipWhiteSpace()
-		while self.pos < len(self.data) and self.data[self.pos] != ')':
+		while self.nextToken != ')':
 			try:
 				gt = self.parseGameTree()
 			except SGFParseError:
@@ -150,10 +150,8 @@ class Parser:
 				raise
 			subtrees.append(gt)
 			self.skipWhiteSpace()
-		if self.pos == len(self.data): # premature end of file
-			raise SGFParseError(self.pos, ')', '<EOF>', self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))])
-		else: # the loop correctly ended on a closing parenthesis, skip that
-			self.pos += 1
+		# the loop correctly ended on a closing parenthesis, skip that
+		self.pos += 1
 		if subtrees:
 			return seq, subtrees
 		else:
@@ -171,58 +169,48 @@ class Parser:
 				raise
 			nodes.append(node)
 			self.skipWhiteSpace()
-			if self.pos == len(self.data) or self.data[self.pos] != ';':
+			if self.nextToken != ';':
 				break
 		return nodes
 	
 	def parseNode(self):
-		if self.data[self.pos] != ';':
-			raise SGFParseError(self.pos, ';', self.data[self.pos], self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))])
+		if self.nextToken != ';':
+			raise SGFParseError(self.pos, ';', self.nextToken, self.context)
 		self.pos += 1
 		properties = {}
 		self.skipWhiteSpace()
-		while self.propid_re.match(self.data, self.pos):
-			propident = ''
-			startpos = self.pos
-			while self.propid_re.match(self.data, self.pos):
-				self.pos += 1
-			if startpos == self.pos: # this should be impossible
-				raise SGFParseError(self.pos, '[A-Z]', self.data[self.pos], self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))])
-			else:
-				propident = self.data[startpos:self.pos]
+		propmatch = self.propid_re.match(self.data, self.pos)
+		while propmatch:
+			propident = propmatch.group(0)
+			self.pos += len(propident)
 			valuelist = []
 			self.skipWhiteSpace()
-			try:
-				value = self.parsePropValue()
-			except SGFParseError:
-				if self.verbosity > 7:
-					print("Error parsing first node value")
-				raise
-			valuelist.append(value[1:-1])
-			self.skipWhiteSpace()
-			while self.data[self.pos] == '[':
+			while True:
 				try:
 					value = self.parsePropValue()
 				except SGFParseError:
 					if self.verbosity > 7:
-						print("Error parsing additional node value", (len(valuelist) + 1))
+						print("Error parsing first node value")
 					raise
 				valuelist.append(value[1:-1])
 				self.skipWhiteSpace()
+				if self.nextToken != '[':
+					break
 			if propident in properties:
 				properties[propident].extend(valuelist)
 			else:
 				properties[propident] = valuelist
 			self.skipWhiteSpace()
+			propmatch = self.propid_re.match(self.data, self.pos)
 		return properties
 	
 	def parsePropValue(self):
-		if self.data[self.pos] != '[':
-			raise SGFParseError(self.pos, '[', self.data[self.pos], self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))])
+		if self.nextToken != '[':
+			raise SGFParseError(self.pos, '[', self.nextToken, self.context)
 		value = self.value_re.match(self.data, self.pos)
 		if value:
 			self.pos += len(value.group(0))
 			return value.group(0)
 		else:
 			self.pos = len(self.data) - 1
-			raise SGFParseError(self.pos, ']', self.data[self.pos], self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))])
+			raise SGFParseError(self.pos, ']', self.nextToken, self.context)
