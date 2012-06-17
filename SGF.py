@@ -22,16 +22,15 @@ class Parser:
 	parsing, so if you write it out again, it will be legal.
 	"""
 
-#	value_re  = re.compile(r'.*?[^\\]\]', re.DOTALL)
 	value_re  = re.compile(r'(?:\\.|[^\\\]])+\]', re.DOTALL) # everything up to next unescaped ']'
 	propid_re = re.compile(r'[A-Z]+')
 	space_re  = re.compile(r'\s+')
 	verbosity = 1
 
-	def __init__(self, data=None):
+	def __init__(self):
 		self.games = []
-		if data:
-			self.games.append(self.parse(data))
+		self.data = ''
+		self.pos = 0
 
 	def parseFromDir(self, dirname, recurse=False):
 		"""Add SGF Data from all sgf files in a directory"""
@@ -52,14 +51,14 @@ class Parser:
 				sgf = f.read()
 			collection = self.parse(sgf)
 			if self.verbosity > 1:
-				print("Parsed file %s successfully", filename)
+				print("Parsed file {} successfully".format(filename))
 			return collection
 		except IOError:
 			if self.verbosity > 0:
-				print("Failed to open file", filename)
+				print("Failed to open file {}".format(filename))
 		except SGFParseError:
 			if self.verbosity > 0:
-				print("SGF parsing error in file", filename)
+				print("SGF parsing error in file {}".format(filename))
 			raise
 			
 	def parse(self, sgf):
@@ -81,7 +80,7 @@ class Parser:
 		if self.verbosity > 2:
 			print("Reached end of data with no errors. SGF succesfully parsed")
 
-		self.games.append(collection)
+		self.games.extend(collection)
 		return collection
 	
 	@property
@@ -114,13 +113,13 @@ class Parser:
 					print("Parsed game tree succesfully")
 			except SGFParseError:
 				if self.verbosity > 3:
-					print(" ".join(("Error parsing game tree", (len(collection)+1))))
+					print("Error parsing game tree {}".format(len(collection)+1))
 				raise
 			self.skipWhiteSpace()
 			if self.nextToken == None: 
 				break # reached EOF after at least one game
 		if self.verbosity > 3:
-			print(" ".join(("Parsed", len(collection), "game trees succesfully")))
+			print("Parsed {} game trees succesfully".format(len(collection)))
 		return collection
 	
 	def parseGameTree(self):
