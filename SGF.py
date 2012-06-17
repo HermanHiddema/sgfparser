@@ -1,5 +1,6 @@
 from __future__ import print_function
 import re
+import os
 
 class SGFParseError(Exception):
 	def __init__(self, pos, expected, found, context):
@@ -34,15 +35,20 @@ class Parser:
 
 	def parseFromDir(self, dirname, recurse=False):
 		"""Add SGF Data from all sgf files in a directory"""
-		pass #TODO
+		games = []
+		for root, dirs, files in os.walk(dirname):
+			if not recurse:
+				dirs[:] = []
+			sgfs = [os.path.join(root, f) for f in files if f.endswith('.sgf')]
+			games.extend(self.parseFromFiles(sgfs))
+		return games
 
 	def parseFromFiles(self, files):
 		"""Add SGF data from a list of files, one by one"""
-		allgames = []
+		games = []
 		for f in files:
-			allgames.append(self.parseFromFile(f))
-
-		return allgames
+			games.extend(self.parseFromFile(f))
+		return games
 
 	def parseFromFile(self, filename):
 		"""Add SGF data from a file"""
