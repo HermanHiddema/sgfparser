@@ -85,6 +85,7 @@ class Parser:
 	
 	@property
 	def nextToken(self):
+		self.skipWhiteSpace()
 		return self.data[self.pos] if self.pos < len(self.data) else None
 	
 	@property
@@ -101,10 +102,10 @@ class Parser:
 	def parseCollection(self):
 		"""Keeps trying to parse a game tree until EOF is reached.
 		Returns a list of game trees (SGF Spec: Collection)
+
 		"""
 		
 		collection = []
-		self.skipWhiteSpace()
 		while True:
 			try:
 				gt = self.parseGameTree()
@@ -115,7 +116,6 @@ class Parser:
 				if self.verbosity > 3:
 					print("Error parsing game tree {}".format(len(collection)+1))
 				raise
-			self.skipWhiteSpace()
 			if self.nextToken == None: 
 				break # reached EOF after at least one game
 		if self.verbosity > 3:
@@ -139,7 +139,6 @@ class Parser:
 				print("Error parsing sequence")
 			raise
 	
-		pos = self.skipWhiteSpace()
 		while self.nextToken != ')':
 			try:
 				gt = self.parseGameTree()
@@ -148,7 +147,6 @@ class Parser:
 					print("Error parsing variation")
 				raise
 			subtrees.append(gt)
-			self.skipWhiteSpace()
 		# the loop correctly ended on a closing parenthesis, skip that
 		self.pos += 1
 		if subtrees:
@@ -158,16 +156,14 @@ class Parser:
 	
 	def parseSequence(self):
 		nodes=[]
-		self.skipWhiteSpace()
 		while True:
 			try:
 				node = self.parseNode()
 			except SGFParseError:
 				if self.verbosity > 6:
-					print("Error parsing additional node")
+					print("Error parsing node")
 				raise
 			nodes.append(node)
-			self.skipWhiteSpace()
 			if self.nextToken != ';':
 				break
 		return nodes
@@ -177,13 +173,11 @@ class Parser:
 			raise SGFParseError(self.pos, ';', self.nextToken, self.context)
 		self.pos += 1
 		properties = {}
-		self.skipWhiteSpace()
-		propmatch = self.propid_re.match(self.data, self.pos)
-		while propmatch:
+		while self.propid_re.match(self.nextToken):
+			propmatch = self.propid_re.match(self.data, self.pos)
 			propident = propmatch.group(0)
 			self.pos += len(propident)
 			valuelist = []
-			self.skipWhiteSpace()
 			while True:
 				try:
 					value = self.parsePropValue()
@@ -192,15 +186,12 @@ class Parser:
 						print("Error parsing first node value")
 					raise
 				valuelist.append(value[1:-1])
-				self.skipWhiteSpace()
 				if self.nextToken != '[':
 					break
 			if propident in properties:
 				properties[propident].extend(valuelist)
 			else:
 				properties[propident] = valuelist
-			self.skipWhiteSpace()
-			propmatch = self.propid_re.match(self.data, self.pos)
 		return properties
 	
 	def parsePropValue(self):
@@ -211,5 +202,6 @@ class Parser:
 			self.pos += len(value.group(0))
 			return value.group(0)
 		else:
+			# value_re failed, therefore no closing bracket was found before EOF. Skip to end and raise error.
 			self.pos = len(self.data) - 1
 			raise SGFParseError(self.pos, ']', self.nextToken, self.context)
