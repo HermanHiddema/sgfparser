@@ -23,12 +23,6 @@ class SGFParser:
 	 1. A non-empty list (sequence) of dictionaries (nodes), with zero or more
 		keys (properties) pointing to a list (values, zero or more)
 	 2. Optionally another list (gametrees for variations)
-	Deviations from the standard:
-	The parser is a little more lenient than the standard. Specifically, if
-	the same property appears in the same node multiple times, the values are
-	merged with the earlier value list. The standard considers this an error.
-	Note that, due to the merging, each property will be unique after
-	parsing, so if you write it out again, it will be legal.
 	"""
 
 	value_re  = re.compile(r'\[(?:\\.|[^\\\]])*\]', re.DOTALL) # everything from a starting '[' up to next unescaped ']'
@@ -120,6 +114,8 @@ class SGFParser:
 		"""Return a list of game trees (SGF Spec: Collection)"""
 		collection = []
 		while self.nextToken != None or not collection:
+			self.gm = 1 # default game type
+			self.ff = 4 # default file format
 			try:
 				collection.append(self.parseGameTree(root=True))
 				if self.verbosity > 4:
@@ -184,10 +180,20 @@ class SGFParser:
 					print("Error parsing property")
 				raise
 			if propident in properties:
-				# the standard considers this an error
-				properties[propident].extend(propvalues)
+				raise SGFValidationError(self.pos, "Duplicate property in the same node")
 			else:
 				properties[propident] = propvalues
+			# FF and GM affect how the game is parsed
+			if propident == 'FF':
+				if len(propvalues = 1) and 1 <= int(propvalues[0]) <= 4:
+					self.ff = int(propvalues[0])
+				else:
+					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be number in range 1-4")
+			if propident == 'GM':
+				if len(propvalues = 1) and 1 <= int(propvalues[0]):
+					self.gm = int(propvalues[0])
+				else:
+					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be a number")
 		return properties
 
 	def parseProperty(self, root=False):
