@@ -90,7 +90,7 @@ class SGFParser:
 	
 	@property
 	def nextToken(self):
-		# skip whitespace first
+		"""Return next non-whitespace character from current position, or None at end"""
 		space = self.space_re.match(self.data, self.pos)
 		if space:
 			self.pos += len(space.group(0))
@@ -101,10 +101,7 @@ class SGFParser:
 		return self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))]
 
 	def parseCollection(self):
-		"""Keep trying to parse a game tree until EOF is reached.
-		Return a list of game trees (SGF Spec: Collection)
-		"""
-		
+		"""Return a list of game trees (SGF Spec: Collection)"""
 		collection = []
 		while self.nextToken != None or not collection:
 			try:
@@ -120,11 +117,7 @@ class SGFParser:
 		return collection
 	
 	def parseGameTree(self):
-		"""Parse a Game Tree. 
-		Returns a tuple of a sequence and (optionally) a list of subtrees
-		
-		"""
-		
+		"""Return a tuple of a sequence and (optionally) a list of subtrees"""
 		if self.nextToken != '(':
 			raise SGFParseError(self.pos, '(', self.nextToken, self.context)
 		self.pos += 1;
@@ -150,6 +143,7 @@ class SGFParser:
 			return seq,
 	
 	def parseSequence(self):
+		"""Return a list of nodes."""
 		nodes=[]
 		while self.nextToken == ';' or not nodes:
 			try:
@@ -161,29 +155,52 @@ class SGFParser:
 		return nodes
 	
 	def parseNode(self):
+		"""Return a dictionary of properties."""
 		if self.nextToken != ';':
 			raise SGFParseError(self.pos, ';', self.nextToken, self.context)
 		self.pos += 1
 		properties = {}
 		while self.nextToken in string.ascii_uppercase:
-			propident = self.propid_re.match(self.data, self.pos).group(0)
-			self.pos += len(propident)
-			valuelist = []
-			while self.nextToken == '[' or not valuelist:
-				try:
-					valuelist.append(self.parsePropValue())
-				except SGFParseError:
-					if self.verbosity > 7:
-						print("Error parsing first node value")
-					raise
+			try:
+				propident, propvalues = self.parseProperty()
+			except SGFParseError:
+				if self.verbosity > 7:
+					print("Error parsing property")
+				raise
 			if propident in properties:
 				# the standard considers this an error
-				properties[propident].extend(valuelist)
+				properties[propident].extend(propvalues)
 			else:
-				properties[propident] = valuelist
+				properties[propident] = propvalues
 		return properties
 
+	def parseProperty(self):
+		try:
+			propident = self.parsePropIdent()
+		except SGFParseError:
+			if self.verbosity > 8:
+				print("Error parsing property ident")
+			raise
+		propvalues = []
+		while self.nextToken == '[' or not propvalues:
+			try:
+				propvalues.append(self.parsePropValue())
+			except SGFParseError:
+				if self.verbosity > 8:
+					print("Error parsing property value")
+				raise
+		return propident, propvalues
+
+	def parsePropIdent(self):
+		propmatch = self.propid_re.match(self.data, self.pos)
+		if not propmatch:
+			raise SGFParseError(self.pos, '[A-Z]', self.nextToken, self.context)
+		propident = propmatch.group(0)
+		self.pos += len(propident)
+		return propident
+
 	def parsePropValue(self):
+		"""Return a list of property value strings."""
 		if self.nextToken != '[':
 			raise SGFParseError(self.pos, '[', self.nextToken, self.context)
 		valuematch = self.value_re.match(self.data, self.pos)
