@@ -1,6 +1,7 @@
 from __future__ import print_function
 import re
 import os
+import string
 
 class SGFParseError(Exception):
 	def __init__(self, pos, expected, found, context):
@@ -8,7 +9,7 @@ class SGFParseError(Exception):
 	def __str__(self):
 		return "Error parsing SGF at position {}. Expected '{}', found '{}'\nContext: {}\n".format(self.values)
 
-class Parser:
+class SGFParser:
 	"""
 	The parser returns a list (collection, potentially empty) of
 	tuples (gametrees), where each such tuple consists of
@@ -23,48 +24,47 @@ class Parser:
 	parsing, so if you write it out again, it will be legal.
 	"""
 
-	value_re  = re.compile(r'(?:\\.|[^\\\]])+\]', re.DOTALL) # everything up to next unescaped ']'
+	value_re  = re.compile(r'\[(?:\\.|[^\\\]])*\]', re.DOTALL) # everything from a starting '[' up to next unescaped ']'
 	propid_re = re.compile(r'[A-Z]+')
 	space_re  = re.compile(r'\s+')
 	verbosity = 1
 
 	def __init__(self):
-		self.games = []
 		self.data = ''
 		self.pos = 0
 
-	def parseFromDir(self, dirname, recurse=False):
+	def parseDir(self, path, recurse=False):
 		"""Add SGF Data from all sgf files in a directory"""
 		games = []
-		for root, dirs, files in os.walk(dirname):
+		for root, dirs, files in os.walk(path):
 			if not recurse:
 				dirs[:] = []
-			sgfs = [os.path.join(root, f) for f in files if f.endswith('.sgf')]
-			games.extend(self.parseFromFiles(sgfs))
+			sgfpaths = [os.path.join(root, f) for f in files if f.endswith('.sgf')]
+			games.extend(self.parseFiles(sgfpaths))
 		return games
 
-	def parseFromFiles(self, files):
+	def parseFiles(self, pathlist):
 		"""Add SGF data from a list of files, one by one"""
 		games = []
-		for f in files:
-			games.extend(self.parseFromFile(f))
+		for path in pathlist:
+			games.extend(self.parseFile(path))
 		return games
 
-	def parseFromFile(self, filename):
+	def parseFile(self, path):
 		"""Add SGF data from a file"""
 		try:
-			with open(filename, 'r') as f:
+			with open(path, 'r') as f:
 				sgf = f.read()
 			collection = self.parse(sgf)
 			if self.verbosity > 1:
-				print("Parsed file {} successfully".format(filename))
+				print("Parsed file {} successfully".format(path))
 			return collection
 		except IOError:
 			if self.verbosity > 0:
-				print("Failed to open file {}".format(filename))
+				print("Failed to open file {}".format(path))
 		except SGFParseError:
 			if self.verbosity > 0:
-				print("SGF parsing error in file {}".format(filename))
+				print("SGF parsing error in file {}".format(path))
 			raise
 			
 	def parse(self, sgf):
@@ -86,44 +86,35 @@ class Parser:
 		if self.verbosity > 2:
 			print("Reached end of data with no errors. SGF succesfully parsed")
 
-		self.games.extend(collection)
 		return collection
 	
 	@property
 	def nextToken(self):
-		self.skipWhiteSpace()
+		# skip whitespace first
+		space = self.space_re.match(self.data, self.pos)
+		if space:
+			self.pos += len(space.group(0))
 		return self.data[self.pos] if self.pos < len(self.data) else None
 	
 	@property
 	def context(self):
 		return self.data[max(0,self.pos-10):min(self.pos+10, len(self.data))]
-	
-	def skipWhiteSpace(self):
-		"""Helper function to skip white-space"""
-
-		space = self.space_re.match(self.data, self.pos)
-		if space:
-			self.pos += len(space.group(0))
 
 	def parseCollection(self):
-		"""Keeps trying to parse a game tree until EOF is reached.
-		Returns a list of game trees (SGF Spec: Collection)
-
+		"""Keep trying to parse a game tree until EOF is reached.
+		Return a list of game trees (SGF Spec: Collection)
 		"""
 		
 		collection = []
-		while True:
+		while self.nextToken != None or not collection:
 			try:
-				gt = self.parseGameTree()
-				collection.append(gt)
+				collection.append(self.parseGameTree())
 				if self.verbosity > 4:
 					print("Parsed game tree succesfully")
 			except SGFParseError:
 				if self.verbosity > 3:
 					print("Error parsing game tree {}".format(len(collection)+1))
 				raise
-			if self.nextToken == None: 
-				break # reached EOF after at least one game
 		if self.verbosity > 3:
 			print("Parsed {} game trees succesfully".format(len(collection)))
 		return collection
@@ -147,14 +138,12 @@ class Parser:
 	
 		while self.nextToken != ')':
 			try:
-				gt = self.parseGameTree()
+				subtrees.append(self.parseGameTree())
 			except SGFParseError:
 				if self.verbosity > 5:
 					print("Error parsing variation")
 				raise
-			subtrees.append(gt)
-		# the loop correctly ended on a closing parenthesis, skip that
-		self.pos += 1
+		self.pos += 1 # the loop correctly ended on a closing parenthesis, skip that
 		if subtrees:
 			return seq, subtrees
 		else:
@@ -162,16 +151,13 @@ class Parser:
 	
 	def parseSequence(self):
 		nodes=[]
-		while True:
+		while self.nextToken == ';' or not nodes:
 			try:
-				node = self.parseNode()
+				nodes.append(self.parseNode())
 			except SGFParseError:
 				if self.verbosity > 6:
 					print("Error parsing node")
 				raise
-			nodes.append(node)
-			if self.nextToken != ';':
-				break
 		return nodes
 	
 	def parseNode(self):
@@ -179,35 +165,33 @@ class Parser:
 			raise SGFParseError(self.pos, ';', self.nextToken, self.context)
 		self.pos += 1
 		properties = {}
-		while self.propid_re.match(self.nextToken):
-			propmatch = self.propid_re.match(self.data, self.pos)
-			propident = propmatch.group(0)
+		while self.nextToken in string.ascii_uppercase:
+			propident = self.propid_re.match(self.data, self.pos).group(0)
 			self.pos += len(propident)
 			valuelist = []
-			while True:
+			while self.nextToken == '[' or not valuelist:
 				try:
-					value = self.parsePropValue()
+					valuelist.append(self.parsePropValue())
 				except SGFParseError:
 					if self.verbosity > 7:
 						print("Error parsing first node value")
 					raise
-				valuelist.append(value[1:-1])
-				if self.nextToken != '[':
-					break
 			if propident in properties:
+				# the standard considers this an error
 				properties[propident].extend(valuelist)
 			else:
 				properties[propident] = valuelist
 		return properties
-	
+
 	def parsePropValue(self):
 		if self.nextToken != '[':
 			raise SGFParseError(self.pos, '[', self.nextToken, self.context)
-		value = self.value_re.match(self.data, self.pos)
-		if value:
-			self.pos += len(value.group(0))
-			return value.group(0)
+		valuematch = self.value_re.match(self.data, self.pos)
+		if valuematch:
+			self.pos += len(valuematch.group(0))
+			return valuematch.group(0)[1:-1]
 		else:
 			# value_re failed, therefore no closing bracket was found before EOF. Skip to end and raise error.
 			self.pos = len(self.data) - 1
 			raise SGFParseError(self.pos, ']', self.nextToken, self.context)
+
