@@ -105,7 +105,7 @@ class SGFParser:
 		collection = []
 		while self.nextToken != None or not collection:
 			try:
-				collection.append(self.parseGameTree())
+				collection.append(self.parseGameTree(root=True))
 				if self.verbosity > 4:
 					print("Parsed game tree succesfully")
 			except SGFParseError:
@@ -116,14 +116,14 @@ class SGFParser:
 			print("Parsed {} game trees succesfully".format(len(collection)))
 		return collection
 	
-	def parseGameTree(self):
+	def parseGameTree(self, root=False):
 		"""Return a tuple of a sequence and (optionally) a list of subtrees"""
 		if self.nextToken != '(':
 			raise SGFParseError(self.pos, '(', self.nextToken, self.context)
 		self.pos += 1;
 		subtrees = []
 		try:
-			seq = self.parseSequence()
+			seq = self.parseSequence(root)
 		except SGFParseError:
 			if self.verbosity > 5:
 				print("Error parsing sequence")
@@ -142,19 +142,19 @@ class SGFParser:
 		else:
 			return seq,
 	
-	def parseSequence(self):
+	def parseSequence(self, root=False):
 		"""Return a list of nodes."""
 		nodes=[]
 		while self.nextToken == ';' or not nodes:
 			try:
-				nodes.append(self.parseNode())
+				nodes.append(self.parseNode(root and not nodes))
 			except SGFParseError:
 				if self.verbosity > 6:
 					print("Error parsing node")
 				raise
 		return nodes
 	
-	def parseNode(self):
+	def parseNode(self, root=False):
 		"""Return a dictionary of properties."""
 		if self.nextToken != ';':
 			raise SGFParseError(self.pos, ';', self.nextToken, self.context)
@@ -162,7 +162,7 @@ class SGFParser:
 		properties = {}
 		while self.nextToken in string.ascii_uppercase:
 			try:
-				propident, propvalues = self.parseProperty()
+				propident, propvalues = self.parseProperty(root)
 			except SGFParseError:
 				if self.verbosity > 7:
 					print("Error parsing property")
@@ -174,7 +174,7 @@ class SGFParser:
 				properties[propident] = propvalues
 		return properties
 
-	def parseProperty(self):
+	def parseProperty(self, root=False):
 		try:
 			propident = self.parsePropIdent()
 		except SGFParseError:
