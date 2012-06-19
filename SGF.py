@@ -9,6 +9,13 @@ class SGFParseError(Exception):
 	def __str__(self):
 		return "Error parsing SGF at position {}. Expected '{}', found '{}'\nContext: {}\n".format(self.values)
 
+class SGFValidationError(Exception):
+	def __init__(self, pos, reason):
+		self.values = pos, reason
+	def __str__(self):
+		return "Error validating SGF at position {}.\nReason: {}\n".format(self.values)
+
+
 class SGFParser:
 	"""
 	The parser returns a list (collection, potentially empty) of
@@ -28,6 +35,15 @@ class SGFParser:
 	propid_re = re.compile(r'[A-Z]+')
 	space_re  = re.compile(r'\s+')
 	verbosity = 1
+
+	root_properties = {
+		'AP':('Application',     'compose simpletext:simpletext' ),
+		'CA':('Charset',         'simpletext'                    ),
+		'FF':('Fileformat',      'number'                        ),
+		'GM':('Gametype',        'number'                        ),
+		'ST':('Variation Style', 'number'                        ),
+		'SZ':('Board Size',      'number | compose number:number')
+	}
 
 	def __init__(self):
 		self.data = ''
@@ -181,6 +197,9 @@ class SGFParser:
 			if self.verbosity > 8:
 				print("Error parsing property ident")
 			raise
+		if propident in self.root_properties and not root:
+			raise SGFValidationError(self.pos, "Illegal root-property {} in non-root node".format(propident))
+
 		propvalues = []
 		while self.nextToken == '[' or not propvalues:
 			try:
