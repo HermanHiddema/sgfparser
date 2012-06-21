@@ -26,17 +26,18 @@ class SGFParser:
 	"""
 
 	value_re  = re.compile(r'\[(?:\\.|[^\\\]])*\]', re.DOTALL) # everything from a starting '[' up to next unescaped ']'
-	propid_re = re.compile(r'[A-Z]+')
+	ff4_propid_re = re.compile(r'[A-Z]+')
+	old_propid_re = re.compile(r'[A-Za-z]+') # propidents used in FF 1-3
 	space_re  = re.compile(r'\s+')
 	verbosity = 1
 
 	root_properties = {
-		'AP':('Application',     'compose simpletext:simpletext' ),
-		'CA':('Charset',         'simpletext'                    ),
-		'FF':('Fileformat',      'number'                        ),
-		'GM':('Gametype',        'number'                        ),
-		'ST':('Variation Style', 'number'                        ),
-		'SZ':('Board Size',      'number | compose number:number')
+		'AP':('Application',     'compose(simpletext:simpletext)' ),
+		'CA':('Charset',         'simpletext'                     ),
+		'FF':('Fileformat',      'number'                         ),
+		'GM':('Gametype',        'number'                         ),
+		'ST':('Variation Style', 'number'                         ),
+		'SZ':('Board Size',      'number|compose(number:number)')
 	}
 
 	def __init__(self):
@@ -115,7 +116,8 @@ class SGFParser:
 		collection = []
 		while self.nextToken != None or not collection:
 			self.gm = 1 # default game type
-			self.ff = 4 # default file format
+			self.ff = 1 # default file format
+			self.propid_re = self.old_propid_re # only if we find and FF[4] tage do we switch to ff4
 			try:
 				collection.append(self.parseGameTree(root=True))
 				if self.verbosity > 4:
@@ -172,7 +174,7 @@ class SGFParser:
 			raise SGFParseError(self.pos, ';', self.nextToken, self.context)
 		self.pos += 1
 		properties = {}
-		while self.nextToken in string.ascii_uppercase:
+		while self.propid_re.match(self.nextToken):
 			try:
 				propident, propvalues = self.parseProperty(root)
 			except SGFParseError:
@@ -180,20 +182,25 @@ class SGFParser:
 					print("Error parsing property")
 				raise
 			if propident in properties:
+				print("{} duplicated at {}. {}".format(propident, self.pos, self.context))
 				raise SGFValidationError(self.pos, "Duplicate property in the same node")
 			else:
 				properties[propident] = propvalues
 			# FF and GM affect how the game is parsed
 			if propident == 'FF':
-				if len(propvalues = 1) and 1 <= int(propvalues[0]) <= 4:
+				if len(propvalues) == 1 and 1 <= int(propvalues[0]) <= 4:
 					self.ff = int(propvalues[0])
+					if self.ff == 4:
+						self.propid_re = self.ff4_propid_re
 				else:
 					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be number in range 1-4")
 			if propident == 'GM':
-				if len(propvalues = 1) and 1 <= int(propvalues[0]):
+				if len(propvalues) == 1 and 1 <= int(propvalues[0]):
 					self.gm = int(propvalues[0])
 				else:
-					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be a number")
+					raise SGFValidationError(self.pos, "Illegal value for GM property. Should be a number")
+		if root and not self.ff:
+			self.ff = 1
 		return properties
 
 	def parseProperty(self, root=False):
@@ -220,8 +227,8 @@ class SGFParser:
 		propmatch = self.propid_re.match(self.data, self.pos)
 		if not propmatch:
 			raise SGFParseError(self.pos, '[A-Z]', self.nextToken, self.context)
-		propident = propmatch.group(0)
-		self.pos += len(propident)
+		self.pos += len(propmatch.group(0))
+		propident = "".join(ch for ch in propmatch.group(0) if ch.isupper()) # filter out lowercase chars allowed in FF 1-3
 		return propident
 
 	def parsePropValue(self):
