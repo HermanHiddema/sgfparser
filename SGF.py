@@ -31,13 +31,15 @@ class SGFParser:
 	space_re  = re.compile(r'\s+')
 	verbosity = 1
 
-	root_properties = {
-		'AP':('Application',     'compose(simpletext:simpletext)' ),
-		'CA':('Charset',         'simpletext'                     ),
-		'FF':('Fileformat',      'number'                         ),
-		'GM':('Gametype',        'number'                         ),
-		'ST':('Variation Style', 'number'                         ),
-		'SZ':('Board Size',      'number|compose(number:number)')
+	valuetype = "(none, number, real, double, color, simpletext, text, point, move, stone)"
+
+	properties = {
+		'AP':{'type':'root', 'valuetype':{'compose simpletext:simpletext'} },  # Application
+		'CA':{'type':'root', 'valuetype':{'simpletext'} },                     # Charset
+		'FF':{'type':'root', 'valuetype':{'number'} },                         # File Format
+		'GM':{'type':'root', 'valuetype':{'number'} },                         # Game type
+		'ST':{'type':'root', 'valuetype':{'number'} },                         # Variation style
+		'SZ':{'type':'root', 'valuetype':{'number', 'compose number:number'} } # Board Size
 	}
 
 	def __init__(self):
@@ -115,8 +117,9 @@ class SGFParser:
 		"""Return a list of game trees (SGF Spec: Collection)"""
 		collection = []
 		while self.nextToken != None or not collection:
-			self.gm = 1 # default game type
-			self.ff = 1 # default file format
+			self.gm = 1 				# default game type
+			self.ff = 1 				# default file format
+			self.charset = 'ISO-8859-1' # default charset
 			self.propid_re = self.old_propid_re # only if we find and FF[4] tage do we switch to ff4
 			try:
 				collection.append(self.parseGameTree(root=True))
@@ -176,7 +179,7 @@ class SGFParser:
 		properties = {}
 		while self.propid_re.match(self.nextToken):
 			try:
-				propident, propvalues = self.parseProperty(root)
+				propident, propvalue = self.parseProperty(root)
 			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 7:
 					print("Error parsing property")
@@ -185,22 +188,16 @@ class SGFParser:
 				print("{} duplicated at {}. {}".format(propident, self.pos, self.context))
 				raise SGFValidationError(self.pos, "Duplicate property in the same node", self.context)
 			else:
-				properties[propident] = propvalues
+				properties[propident] = propvalue
 			# FF and GM affect how the game is parsed
 			if propident == 'FF':
-				if len(propvalues) == 1 and 1 <= int(propvalues[0]) <= 4:
-					self.ff = int(propvalues[0])
-					if self.ff == 4:
-						self.propid_re = self.ff4_propid_re
-				else:
+				self.ff = propvalue
+				if not 1 <= self.ff <= 4:
 					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be number in range 1-4", self.context)
-			if propident == 'GM':
-				if len(propvalues) == 1 and 1 <= int(propvalues[0]):
-					self.gm = int(propvalues[0])
-				else:
-					raise SGFValidationError(self.pos, "Illegal value for GM property. Should be a number", self.context)
-		if root and not self.ff:
-			self.ff = 1
+				if self.ff == 4:
+					self.propid_re = self.ff4_propid_re
+			elif propident == 'GM':
+					self.gm = propvalue
 		return properties
 
 	def parseProperty(self, root=False):
@@ -210,18 +207,23 @@ class SGFParser:
 			if self.verbosity > 8:
 				print("Error parsing property ident")
 			raise
-		if propident in self.root_properties and not root:
-			raise SGFValidationError(self.pos, "Illegal root-property {} in non-root node".format(propident), self.context)
-
-		propvalues = []
-		while self.nextToken == '[' or not propvalues:
+		if propident not in properties or 'list' in properties[propident]['valuetype']:
 			try:
-				propvalues.append(self.parsePropValue())
+				propvalue = self.parsePropValueList(propident)
+			except (SGFParseError, SGFValidationError):
+				if self.verbosity > 8:
+					print("Error parsing property values")
+				raise
+		else:
+			try:
+				propvalue = self.parsePropValue(propident)
 			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 8:
 					print("Error parsing property value")
 				raise
-		return propident, propvalues
+		if propident in properties and properties[propident]['type'] == 'root' and not root
+			raise SGFValidationError(self.pos, "Illegal root-property {} in non-root node".format(propident), self.context)
+		return propident, propvalue
 
 	def parsePropIdent(self):
 		propmatch = self.propid_re.match(self.data, self.pos)
@@ -231,16 +233,103 @@ class SGFParser:
 		propident = "".join(ch for ch in propmatch.group(0) if ch.isupper()) # filter out lowercase chars allowed in FF 1-3
 		return propident
 
-	def parsePropValue(self):
-		"""Return a list of property value strings."""
+	def parsePropValueList(self, valuetypes)
+		propvalues = []
+		while self.nextToken == '[' or not propvalues:
+			try:
+				propvalue = self.parsePropValue(valuetypes)
+			except (SGFParseError, SGFValidationError):
+				if self.verbosity > 8:
+					print("Error parsing property value in value list")
+				raise
+
+	def parsePropValue(self, vtypes):
+		"""Return a single property value."""
 		if self.nextToken != '[':
 			raise SGFParseError(self.pos, '[', self.nextToken, self.context)
 		valuematch = self.value_re.match(self.data, self.pos)
 		if valuematch:
 			self.pos += len(valuematch.group(0))
-			return valuematch.group(0)[1:-1]
+			value = valuematch.group(0)[1:-1]
+			# parse the value
+			if not isinstance(vtypes, tuple):
+ 				vtypes = (vtypes,)
+			vtypes = list(vtypes)
+			if 'none' in valuetypes:
+				if len(value) == 0:
+					return value
+				vtypes
+			if 'number' in valuetypes:
+				try:
+					return int(value)
+				except ValueError:
+					pass
+			if 'real' in valuetypes:
+				try:
+					return float(value)
+				except ValueError:
+					pass
+			if 'double' in valuetypes and value in ['1', '2']:
+				return int(value)
+			if 'color' in valuetypes and value in ['B', 'W']:
+				return value
+			if 'simpletext' in valuetypes:
+				value = unicode(value, self.charset)
+				value = re.sub(r'(\\.|[^\\\]])*\]'
+				return re.sub('\s',' ',value)
+			if 'text'
+				value = unicode(value, self.charset)
+
+
 		else:
 			# value_re failed, therefore no closing bracket was found before EOF. Skip to end and raise error.
 			self.pos = len(self.data) - 1
 			raise SGFParseError(self.pos, ']', self.nextToken, self.context)
+
+
+	valuetypes = ('none' , 'number' , 'real' , 'double' , 'color' , 'simpleText' , 'text' , 'point'  , 'move' , 'stone')
+
+	def parseNumber(value):
+		try:
+			return int(value)
+		except ValueError:
+			raise SGFValidationError(self.pos, "Value should be an integer number")
+
+	def parseReal(value):
+		try:
+			return float(value)
+		except ValueError:
+			raise SGFValidationError(self.pos, "Value should be a number")
+
+	def parseDouble(value):
+		if value in ['1', '2']:
+			return int(value)
+		else:
+			raise SGFValidationError(self.pos, "Value should be 1 or 2")
+ 
+
+	def parseColor(value):
+		if value in ['B', 'W']:
+			return int(value)
+		else:
+			raise SGFValidationError(self.pos, "Value should be B or W")
+
+	def parseSimpleText(value):
+		return value
+
+	def parseText(value):
+		return value
+
+	def parsePoint(value):
+		return value
+
+	def parseMove(value):
+		return value
+
+	def parseStone(value):
+		return
+
+
+
+
 
