@@ -10,10 +10,10 @@ class SGFParseError(Exception):
 		return "Error parsing SGF at position {}. Expected '{}', found '{}'\nContext: {}\n".format(self.values)
 
 class SGFValidationError(Exception):
-	def __init__(self, pos, reason):
-		self.values = pos, reason
+	def __init__(self, pos, reason, context):
+		self.values = pos, reason, context
 	def __str__(self):
-		return "Error validating SGF at position {}.\nReason: {}\n".format(self.values)
+		return "Error validating SGF at position {}.\nReason: {}\nContext: {}".format(self.values)
 
 
 class SGFParser:
@@ -73,7 +73,7 @@ class SGFParser:
 		except IOError:
 			if self.verbosity > 0:
 				print("Failed to open file {}".format(path))
-		except SGFParseError:
+		except (SGFParseError, SGFValidationError):
 			if self.verbosity > 0:
 				print("SGF parsing error in file {}".format(path))
 			raise
@@ -86,7 +86,7 @@ class SGFParser:
 
 		try:
 			collection = self.parseCollection()
-		except SGFParseError:
+		except (SGFParseError, SGFValidationError):
 			if self.verbosity > 2:
 				print("Error parsing Collection")
 			raise
@@ -122,7 +122,7 @@ class SGFParser:
 				collection.append(self.parseGameTree(root=True))
 				if self.verbosity > 4:
 					print("Parsed game tree succesfully")
-			except SGFParseError:
+			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 3:
 					print("Error parsing game tree {}".format(len(collection)+1))
 				raise
@@ -138,7 +138,7 @@ class SGFParser:
 		subtrees = []
 		try:
 			seq = self.parseSequence(root)
-		except SGFParseError:
+		except (SGFParseError, SGFValidationError):
 			if self.verbosity > 5:
 				print("Error parsing sequence")
 			raise
@@ -146,7 +146,7 @@ class SGFParser:
 		while self.nextToken != ')':
 			try:
 				subtrees.append(self.parseGameTree())
-			except SGFParseError:
+			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 5:
 					print("Error parsing variation")
 				raise
@@ -162,7 +162,7 @@ class SGFParser:
 		while self.nextToken == ';' or not nodes:
 			try:
 				nodes.append(self.parseNode(root and not nodes))
-			except SGFParseError:
+			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 6:
 					print("Error parsing node")
 				raise
@@ -177,13 +177,13 @@ class SGFParser:
 		while self.propid_re.match(self.nextToken):
 			try:
 				propident, propvalues = self.parseProperty(root)
-			except SGFParseError:
+			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 7:
 					print("Error parsing property")
 				raise
 			if propident in properties:
 				print("{} duplicated at {}. {}".format(propident, self.pos, self.context))
-				raise SGFValidationError(self.pos, "Duplicate property in the same node")
+				raise SGFValidationError(self.pos, "Duplicate property in the same node", self.context)
 			else:
 				properties[propident] = propvalues
 			# FF and GM affect how the game is parsed
@@ -193,12 +193,12 @@ class SGFParser:
 					if self.ff == 4:
 						self.propid_re = self.ff4_propid_re
 				else:
-					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be number in range 1-4")
+					raise SGFValidationError(self.pos, "Illegal value for FF property. Should be number in range 1-4", self.context)
 			if propident == 'GM':
 				if len(propvalues) == 1 and 1 <= int(propvalues[0]):
 					self.gm = int(propvalues[0])
 				else:
-					raise SGFValidationError(self.pos, "Illegal value for GM property. Should be a number")
+					raise SGFValidationError(self.pos, "Illegal value for GM property. Should be a number", self.context)
 		if root and not self.ff:
 			self.ff = 1
 		return properties
@@ -206,18 +206,18 @@ class SGFParser:
 	def parseProperty(self, root=False):
 		try:
 			propident = self.parsePropIdent()
-		except SGFParseError:
+		except (SGFParseError, SGFValidationError):
 			if self.verbosity > 8:
 				print("Error parsing property ident")
 			raise
 		if propident in self.root_properties and not root:
-			raise SGFValidationError(self.pos, "Illegal root-property {} in non-root node".format(propident))
+			raise SGFValidationError(self.pos, "Illegal root-property {} in non-root node".format(propident), self.context)
 
 		propvalues = []
 		while self.nextToken == '[' or not propvalues:
 			try:
 				propvalues.append(self.parsePropValue())
-			except SGFParseError:
+			except (SGFParseError, SGFValidationError):
 				if self.verbosity > 8:
 					print("Error parsing property value")
 				raise
